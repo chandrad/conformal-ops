@@ -154,25 +154,35 @@ Method: *When Is Conformal Coverage Free? Switching Thresholds for Predict-then-
 
 ## Methods
 
-All methods share the same `.step()` interface for easy comparison:
+Alongside the `FreeCoverageDiagnostic` (which uses `.run()`), the package ships a suite of **online
+predict-then-optimize methods** behind one `.step()` interface, so you can swap one for another and
+compare on equal terms:
 
 ```python
 result = method.step(c_pred, c_true, A_eq=A_eq, b_eq=b_eq, bounds=bounds)
 # result: {"z_opt", "cost", "poc", "std_covered", "radii", ...}
-
 stats = method.get_results()
 # stats: {"coverage", "avg_poc", "avg_cost", "n_rounds"}
 ```
 
-| Method | Class | Description | Reference |
-|--------|-------|-------------|-----------|
-| **DICA** | `DICA(beta=0.5)` | Allocation-feedback radii redistribution | [Dronavajjala, 2026](#citation) |
-| **UCA** | `UCA()` | Uniform Conformal Allocation (standard online conformal). Equivalent to DICA with β=0. | [Gibbs & Candès, 2021](https://proceedings.neurips.cc/paper/2021/hash/0d441de75e12db29bb25b4e63f23e12f-Abstract.html) |
-| **CPO** | `CPO()` | Conformal Predict-then-Optimize. Split conformal with periodic recalibration. Coverage degrades under distribution shift. | [Patel et al., AISTATS 2024](https://proceedings.mlr.press/v238/patel24a.html) |
-| **EWMA** | `EWMA()` | Exponential weighted moving average heuristic. No coverage target. Illustrates the gap between ad-hoc heuristics and calibrated methods. | — |
-| **ACRO** | `ACRO()` | Group-conditional conformal by patient acuity tercile (Mondrian-style). Tests whether group-level calibration reduces PoC. | Inspired by [Vovk et al., 2003](https://pure.royalholloway.ac.uk/en/publications/mondrian-confidence-machine) |
-| **Nominal** | `Nominal()` | Solve LP with predictions directly. No robustification. PoC = 0 by definition. | — |
-| **FixedMargin** | `FixedMargin(0.10)` | Add fixed percentage buffer (e.g., 10%). Common operational heuristic. | — |
+They fall into three groups. Each baseline **removes or changes one ingredient**, so a comparison
+attributes any gain (or loss) to the right cause rather than to a confound:
+
+| Group | Class | What it is / what it isolates |
+|---|---|---|
+| **Calibrated online** | **`DICA(beta=0.5)`** | UCA **plus** radii reshaped by the LP's own allocation → *same* coverage, *lower* Price of Coverage. The package's headline method. |
+| | **`UCA()`** | Uniform Conformal Allocation — standard Gibbs-Candès online conformal (= DICA with β=0). The apples-to-apples baseline for DICA. |
+| **Split conformal** | **`CPO()`** | Conformal Predict-then-Optimize; recalibrates on a held-out set periodically. Coverage **degrades under shift** as that set goes stale — the reason online calibration exists. |
+| **Heuristics / ablations** | **`EWMA()`** | Adaptive radii **without** the coverage-tracking step — isolates what calibration is worth (spoiler: coverage collapses). |
+| | **`FixedMargin(0.10)`** | A fixed ±10% buffer — the common operational rule of thumb. |
+| | **`Nominal()`** | No hedging at all; PoC = 0 by definition — the cost lower bound. |
+| | **`ACRO()`** | Group-conditional (Mondrian) conformal by acuity tercile — tests whether stratification *alone* reduces PoC. |
+
+**How to read a comparison:** always look at **PoC and coverage together**. PoC is only meaningful
+*at the target coverage* — a method that appears to "save cost" by quietly under-covering (e.g.
+EWMA) isn't cheaper, it just isn't hedging the risk it claims to.
+
+*References:* [Gibbs & Candès 2021](https://proceedings.neurips.cc/paper/2021/hash/0d441de75e12db29bb25b4e63f23e12f-Abstract.html) (UCA), [Patel et al. 2024](https://proceedings.mlr.press/v238/patel24a.html) (CPO), [Vovk et al. 2003](https://pure.royalholloway.ac.uk/en/publications/mondrian-confidence-machine) (ACRO); DICA — [this package's paper](#citation).
 
 ## What's Inside
 
@@ -230,17 +240,40 @@ pip install -e ".[dev]"
 pytest -q          # 54 tests, ~7 s
 ```
 
-## Key Results (from paper)
+## Key Results
 
-| Metric | UCA (standard) | DICA | CPO | EWMA |
-|--------|---------------|------|-----|------|
-| PoC (nurse, MIMIC) | +7.9% | **+4.4%** | +7.3% | +12.4% |
-| PoC (discharge, MIMIC) | +13.8% | **+7.5%** | +12.2% | +20.2% |
-| Coverage | 90% | 90% | 78–86% | 0–22% |
+### DICA reduces the Price of Coverage (MLHC 2026)
 
-Validated on 328K patient stays from MIMIC-IV, eICU, and UCI Diabetes.
+The **Price of Coverage (PoC)** is the excess cost of hedging — how much more the robust decision
+costs than the nominal one. Lower is better, **but only at the target coverage**: a method that
+under-covers isn't paying less for protection, it just isn't providing it.
 
-**DICA reduces PoC by 43–54%** relative to UCA while maintaining the same 90% coverage.
+| Metric | Nominal | UCA (standard) | **DICA** | CPO | EWMA |
+|---|---|---|---|---|---|
+| PoC — nurse staffing (MIMIC) | 0% | +7.9% | **+4.4%** | +7.3% | +12.4% |
+| PoC — discharge (MIMIC) | 0% | +13.8% | **+7.5%** | +12.2% | +20.2% |
+| Coverage | — | 90% | 90% | 78–86% | 0–22% |
+
+**How to read it:**
+- **DICA vs UCA** — identical 90% coverage, roughly *half* the PoC (7.9→4.4, 13.8→7.5): a
+  **43–54% cut** in the cost of calibrated uncertainty, purely from reshaping *where* the radii go
+  (toward the dimensions the LP actually uses), not from weakening the guarantee.
+- **The coverage row is the catch.** CPO's split calibration **goes stale under shift** (drops to
+  78–86%), and EWMA — adaptive radii with no coverage target — **collapses to 0–22%**. EWMA even
+  has *higher* PoC, so dropping the calibration step buys nothing.
+- **PoC alone is misleading.** Only UCA and DICA actually hold the 90% guarantee, so only their PoC
+  numbers are comparable on equal terms — exactly the "read cost *and* coverage together" point.
+
+Validated on **328K patient stays** across MIMIC-IV, eICU, and UCI Diabetes.
+
+### Is coverage free in the first place? (COPA 2026)
+
+Before *reducing* PoC, `FreeCoverageDiagnostic` asks whether there is any to reduce — and the
+answer is problem-dependent. Across the COPA benchmarks it is sharp: on **energy dispatch**
+coverage is **free** (it never changes which generators run; PoC ≈ 0), whereas on dense **city-scale
+routing** it is **costly** (the chosen route changes on ~half the rounds). More candidate decisions
+⇒ smaller cost gaps ⇒ less free. Run the diagnostic (Quickstart A / the `free_coverage*` notebooks)
+to get this verdict on your own predictor and LP.
 
 ## When to use which
 
