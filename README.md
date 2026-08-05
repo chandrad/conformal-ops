@@ -4,7 +4,7 @@
 
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-22%2F22%20passing-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/tests-54%2F54%20passing-brightgreen.svg)]()
 
 `conformal-ops` provides methods for integrating online conformal prediction with downstream optimization. It includes **DICA** (Decision-Informed Conformal Adaptation) and five baseline methods — all sharing the same interface for easy benchmarking.
 
@@ -100,6 +100,39 @@ where  w_j = ((1 - β) + β · z̄_j / max(z̄)) / w̄
 
 The scalar coverage guarantee (Gibbs-Candès) is preserved — only the radii allocation changes.
 
+## Diagnostics: Is Coverage Free?
+
+Before you spend effort *reducing* the Price of Coverage, ask the prior question:
+**does conformal coverage change your decision at all?** If it does not, the calibrated
+uncertainty set is a *free certificate* — 90% coverage tracking at **zero cost** to the decision.
+
+`FreeCoverageDiagnostic` runs a short calibration pilot with your predictor and your LP, and
+returns a **free / critical / costly** verdict:
+
+```python
+import numpy as np
+from conformal_ops import FreeCoverageDiagnostic
+
+# A short calibration pilot: predicted vs true cost vectors + your LP.
+report = FreeCoverageDiagnostic(alpha=0.10).run(
+    c_pred_stream, c_true_stream,          # shape (T, d) each
+    A_eq=A_eq, b_eq=b_eq, bounds=bounds,   # same LP interface as the methods
+)
+report.regime                  # "free" | "critical" | "costly"
+report.neutral_frac_committed  # measured decision-neutral fraction (support set)
+report.neutral_frac_vector     # ... and full-vector neutrality
+```
+
+It reports decision-neutrality at **two granularities** — committed-set (support) and full
+vector — because a decision can be support-stable at 100% while a fractional vertex still shifts.
+Supply an optional `competitors` oracle (K-shortest-paths for graphs, vertex enumeration for
+small LPs) to also get the analytic switching threshold κ\* and safety margin
+`m = (κ* − q*) / σ_q`.
+
+> **`DICA` *reduces* the Price of Coverage; `FreeCoverageDiagnostic` tells you whether you have one to reduce.**
+
+Method: *When Is Conformal Coverage Free? Switching Thresholds for Predict-then-Optimize* (COPA 2026).
+
 ## Methods
 
 All methods share the same `.step()` interface for easy comparison:
@@ -129,6 +162,7 @@ conformal_ops/
 ├── core/           # Gibbs-Candès online conformal prediction
 ├── dica/           # DICA: allocation-feedback radii redistribution
 ├── baselines/      # UCA, CPO, EWMA, ACRO, Nominal, FixedMargin
+├── diagnostics/    # FreeCoverageDiagnostic: is coverage decision-neutral?
 └── problems/       # Example LP formulations (nurse/bed/discharge)
 ```
 
@@ -144,6 +178,9 @@ python examples/nurse_staffing_demo.py
 
 # Use DICA with your own LP
 python examples/custom_lp.py
+
+# Is coverage free? free / critical / costly verdict (< 2 seconds)
+python examples/free_coverage_demo.py
 ```
 
 **Interactive notebooks:**
@@ -151,6 +188,8 @@ python examples/custom_lp.py
 | Notebook | Data | Description |
 |----------|------|-------------|
 | `examples/dica_tutorial.ipynb` | Synthetic | Step-by-step tutorial: setup, run, visualize, tune β |
+| `examples/free_coverage.ipynb` | Synthetic | Free-coverage diagnostic: free vs costly, and analytic κ\* |
+| `examples/free_coverage_real_data.ipynb` | California Housing (20K) | Free-coverage diagnostic on a real predictor: committed-set vs vector neutrality, dimension dependence |
 | `examples/real_data_healthcare.ipynb` | UCI Diabetes (100K) | Real hospital LOS prediction → nurse staffing |
 | `examples/real_data_housing.ipynb` | California Housing (20K) | Non-healthcare: house value prediction → investment allocation |
 
@@ -181,7 +220,7 @@ DICA is domain-agnostic: it works for healthcare staffing, energy allocation, po
 ```bash
 pip install -e ".[dev]"
 pytest tests/ -v
-# 22 tests, ~5 seconds
+# 54 tests, ~7 seconds
 ```
 
 ## Coming Soon

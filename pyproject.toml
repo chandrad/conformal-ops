@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "conformal-ops"
-version = "0.1.0"
-description = "Online Conformal Prediction for Optimization — DICA and beyond"
+version = "0.2.0"
+description = "Online Conformal Prediction for Optimization — DICA and the free-coverage diagnostic"
 readme = "README.md"
 license = {text = "MIT"}
 requires-python = ">=3.9"
@@ -14,7 +14,8 @@ dependencies = ["numpy>=1.21", "scipy>=1.7"]
 
 [project.optional-dependencies]
 viz = ["matplotlib>=3.5"]
-dev = ["pytest>=7.0", "matplotlib>=3.5"]
+examples = ["matplotlib>=3.5", "scikit-learn>=1.0"]
+dev = ["pytest>=7.0", "matplotlib>=3.5", "scikit-learn>=1.0"]
 
 [project.urls]
 Homepage = "https://github.com/chandrad/conformal-ops"
