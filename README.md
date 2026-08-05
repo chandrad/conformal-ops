@@ -131,7 +131,7 @@ small LPs) to also get the analytic switching threshold κ\* and safety margin
 
 > **`DICA` *reduces* the Price of Coverage; `FreeCoverageDiagnostic` tells you whether you have one to reduce.**
 
-Method: *When Is Conformal Coverage Free? Switching Thresholds for Predict-then-Optimize* (COPA 2026).
+Method: *When Is Conformal Coverage Free? Switching Thresholds for Predict-then-Optimize* (COPA 2026, PMLR 329).
 
 ## Methods
 
@@ -239,6 +239,8 @@ pytest tests/ -v
 
 ## Citation
 
+`DICA` and the package (MLHC 2026, PMLR 340):
+
 ```bibtex
 @inproceedings{dronavajjala2026dica,
   title={Decision-Informed Online Conformal Prediction for {ICU} Resource Allocation},
@@ -247,6 +249,20 @@ pytest tests/ -v
   volume={340},
   year={2026},
   publisher={PMLR}
+}
+```
+
+The `FreeCoverageDiagnostic` method (COPA 2026, PMLR 329):
+
+```bibtex
+@inproceedings{dronavajjala2026free,
+  title={When Is Conformal Coverage Free? Switching Thresholds for Predict-then-Optimize},
+  author={Dronavajjala, Chandra Sekhar and Kuppa, Shiva},
+  booktitle={Proceedings of Machine Learning Research},
+  volume={329},
+  year={2026},
+  publisher={PMLR},
+  note={To appear}
 }
 ```
 
