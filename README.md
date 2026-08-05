@@ -1,16 +1,22 @@
 # conformal-ops
 
-**Online Conformal Prediction for Optimization**
+**Online Conformal Prediction for Predict-then-Optimize**
 
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Tests](https://img.shields.io/badge/tests-54%2F54%20passing-brightgreen.svg)]()
 
-`conformal-ops` provides methods for integrating online conformal prediction with downstream optimization. It includes **DICA** (Decision-Informed Conformal Adaptation) and five baseline methods — all sharing the same interface for easy benchmarking.
+`conformal-ops` brings calibrated, distribution-free uncertainty to **predict-then-optimize**
+pipelines (predict a cost vector → solve an LP → observe → repeat). It packages **two published
+methods** behind one `scipy.linprog`-style interface, plus five baselines for benchmarking:
 
-DICA uses LP allocation feedback to reshape conformal radii, reducing the cost of calibrated uncertainty by 43–54% while maintaining 90% coverage.
+| Method | Question it answers | Paper |
+|---|---|---|
+| **`FreeCoverageDiagnostic`** | *Is coverage free?* — before you hedge, does conformal uncertainty change your decision at all? Returns **free / critical / costly**. | [COPA 2026, PMLR 329](#citation) |
+| **`DICA`** | *Make coverage cheaper.* — reshape conformal radii using the optimizer's own allocation, cutting the Price of Coverage **43–54%** while holding **90%** coverage. | [MLHC 2026, PMLR 340](https://proceedings.mlr.press/v340/) |
 
-**Paper:** [Decision-Informed Online Conformal Prediction for ICU Resource Allocation](https://proceedings.mlr.press/v340/) (MLHC 2026, PMLR 340)
+> **Diagnose, then reduce.** `FreeCoverageDiagnostic` tells you *whether* you have a Price of
+> Coverage; `DICA` *reduces* it. Both run on the same `(c_pred, c_true, LP)` inputs.
 
 ## Installation
 
@@ -25,9 +31,35 @@ cd conformal-ops
 pip install -e ".[dev]"
 ```
 
-## 30-Second Quickstart
+## Quickstart
 
-Copy-paste this. It runs in 2 seconds, no data needed:
+Two copy-paste snippets — each runs in ~2 seconds, no data needed.
+
+### A. *Is coverage free?* — `FreeCoverageDiagnostic` (COPA)
+
+Run this **before** deploying conformal hedging: it measures whether coverage changes the decision.
+
+```python
+import numpy as np
+from conformal_ops import FreeCoverageDiagnostic
+
+# A short calibration pilot: predicted vs true cost vectors over T rounds, and your LP.
+rng = np.random.RandomState(0)
+d, T = 5, 200
+base = np.array([0.1, 1.0, 1.0, 1.0, 1.0])           # item 0 clearly cheapest
+c_true = base + rng.normal(0, 0.01, (T, d))
+c_pred = c_true + rng.normal(0, 0.02, (T, d))         # an accurate predictor
+lp = dict(A_eq=np.ones((1, d)), b_eq=np.array([1.0]), bounds=[(0.0, 1.0)] * d)
+
+report = FreeCoverageDiagnostic(alpha=0.10).run(c_pred, c_true, **lp)
+print(report.regime)                  # "free" → coverage never changes the decision
+print(report.neutral_frac_committed)  # ~1.00 (funded set unchanged)
+# Verdict "costly"? → reduce the premium with DICA (below).
+```
+
+### B. *Reduce the Price of Coverage* — `DICA` (MLHC)
+
+When coverage **is** costly, DICA reshapes the radii to cut the premium while holding 90% coverage.
 
 ```python
 import numpy as np
@@ -59,7 +91,8 @@ print(dica.get_results())
 # {'coverage': ~0.90, 'dica_coverage': ~0.90, 'avg_poc': ~0.003, ...}
 ```
 
-**That's it.** Three lines to set up, one line per round. DICA handles conformal prediction, radii reshaping, and LP solving internally.
+**Same inputs, one interface.** Both methods take `(c_pred, c_true, LP)`; the diagnostic runs a
+pilot and returns a verdict, DICA runs the online loop and returns per-round decisions.
 
 ### Using with your own predictor and LP
 
@@ -100,38 +133,24 @@ where  w_j = ((1 - β) + β · z̄_j / max(z̄)) / w̄
 
 The scalar coverage guarantee (Gibbs-Candès) is preserved — only the radii allocation changes.
 
-## Diagnostics: Is Coverage Free?
+## How the diagnostic works
 
-Before you spend effort *reducing* the Price of Coverage, ask the prior question:
-**does conformal coverage change your decision at all?** If it does not, the calibrated
-uncertainty set is a *free certificate* — 90% coverage tracking at **zero cost** to the decision.
+`FreeCoverageDiagnostic` (Quickstart A) runs a short online-conformal calibration pilot on your
+predictor and LP, and each round compares the **robust** decision (`argmin (ĉ+r)ᵀx`) against the
+**nominal** one (`argmin ĉᵀx`). It reports:
 
-`FreeCoverageDiagnostic` runs a short calibration pilot with your predictor and your LP, and
-returns a **free / critical / costly** verdict:
+- **`regime`** — `free` (coverage never changes the decision), `critical`, or `costly`.
+- **decision-neutrality at two granularities** — the **committed set** (which variables are active)
+  and the **full vector** (the exact allocation). These can disagree: a decision can be
+  set-stable at 100% while a fractional vertex still shifts, so report the one that matches your
+  real decision.
+- **`coverage`, `q*`, `σ_q`** — the realized coverage (a calibration sanity check) and the size /
+  fluctuation of the conformal quantile over the pilot.
+- **analytic κ\* and safety margin** `m = (κ* − q*) / σ_q` — *optional*, when you pass a
+  `competitors` oracle (K-shortest-paths for graphs, vertex enumeration for small LPs).
 
-```python
-import numpy as np
-from conformal_ops import FreeCoverageDiagnostic
-
-# A short calibration pilot: predicted vs true cost vectors + your LP.
-report = FreeCoverageDiagnostic(alpha=0.10).run(
-    c_pred_stream, c_true_stream,          # shape (T, d) each
-    A_eq=A_eq, b_eq=b_eq, bounds=bounds,   # same LP interface as the methods
-)
-report.regime                  # "free" | "critical" | "costly"
-report.neutral_frac_committed  # measured decision-neutral fraction (support set)
-report.neutral_frac_vector     # ... and full-vector neutrality
-```
-
-It reports decision-neutrality at **two granularities** — committed-set (support) and full
-vector — because a decision can be support-stable at 100% while a fractional vertex still shifts.
-Supply an optional `competitors` oracle (K-shortest-paths for graphs, vertex enumeration for
-small LPs) to also get the analytic switching threshold κ\* and safety margin
-`m = (κ* − q*) / σ_q`.
-
-> **`DICA` *reduces* the Price of Coverage; `FreeCoverageDiagnostic` tells you whether you have one to reduce.**
-
-Method: *When Is Conformal Coverage Free? Switching Thresholds for Predict-then-Optimize* (COPA 2026, PMLR 329).
+Method: *When Is Conformal Coverage Free? Switching Thresholds for Predict-then-Optimize*
+(COPA 2026, PMLR 329).
 
 ## Methods
 
@@ -166,32 +185,50 @@ conformal_ops/
 └── problems/       # Example LP formulations (nurse/bed/discharge)
 ```
 
-## Examples & Tutorials
+## How to run
+
+**Install.** The library core is just `numpy` + `scipy`; the demos and notebooks additionally
+need `scikit-learn` + `matplotlib` (bundled in the `examples` extra):
 
 ```bash
-# Quickstart — DICA vs UCA in 30 lines (< 2 seconds)
-python examples/quickstart.py
-
-# Full demo with 3 plots (coverage, PoC, radii)
-pip install matplotlib
-python examples/nurse_staffing_demo.py
-
-# Use DICA with your own LP
-python examples/custom_lp.py
-
-# Is coverage free? free / critical / costly verdict (< 2 seconds)
-python examples/free_coverage_demo.py
+pip install conformal-ops                 # library only (numpy + scipy)
+pip install "conformal-ops[examples]"     # + scikit-learn, matplotlib for demos/notebooks
+# from source (with tests): pip install -e ".[dev]"
 ```
 
-**Interactive notebooks:**
+**Runnable scripts** (from the repo root, each ~2 s):
 
-| Notebook | Data | Description |
-|----------|------|-------------|
-| `examples/dica_tutorial.ipynb` | Synthetic | Step-by-step tutorial: setup, run, visualize, tune β |
-| `examples/free_coverage.ipynb` | Synthetic | Free-coverage diagnostic: free vs costly, and analytic κ\* |
-| `examples/free_coverage_real_data.ipynb` | California Housing (20K) | Free-coverage diagnostic on a real predictor: committed-set vs vector neutrality, dimension dependence |
-| `examples/real_data_healthcare.ipynb` | UCI Diabetes (100K) | Real hospital LOS prediction → nurse staffing |
-| `examples/real_data_housing.ipynb` | California Housing (20K) | Non-healthcare: house value prediction → investment allocation |
+```bash
+# --- FreeCoverageDiagnostic (COPA) ---
+python examples/free_coverage_demo.py     # free / critical / costly verdict
+
+# --- DICA (MLHC) ---
+python examples/quickstart.py             # DICA vs UCA: Price-of-Coverage comparison
+python examples/nurse_staffing_demo.py    # DICA with 3 plots (needs matplotlib)
+python examples/custom_lp.py              # DICA on your own LP
+```
+
+**Notebooks** — committed already-executed (they render with outputs on GitHub). Re-run any in
+place with:
+
+```bash
+jupyter nbconvert --to notebook --execute --inplace examples/<name>.ipynb
+```
+
+| Notebook | Method | Data | What it shows |
+|---|---|---|---|
+| `examples/free_coverage.ipynb` | FreeCoverage (COPA) | synthetic | free vs costly, analytic κ\* |
+| `examples/free_coverage_real_data.ipynb` | FreeCoverage (COPA) | California Housing (20K) | committed-set vs vector neutrality, dimension dependence |
+| `examples/dica_tutorial.ipynb` | DICA (MLHC) | synthetic | setup, run, visualize, tune β |
+| `examples/real_data_healthcare.ipynb` | DICA (MLHC) | UCI Diabetes (100K) | hospital LOS prediction → nurse staffing |
+| `examples/real_data_housing.ipynb` | DICA (MLHC) | California Housing (20K) | house value → investment allocation |
+
+**Tests:**
+
+```bash
+pip install -e ".[dev]"
+pytest -q          # 54 tests, ~7 s
+```
 
 ## Key Results (from paper)
 
@@ -205,23 +242,18 @@ Validated on 328K patient stays from MIMIC-IV, eICU, and UCI Diabetes.
 
 **DICA reduces PoC by 43–54%** relative to UCA while maintaining the same 90% coverage.
 
-## When to Use DICA
+## When to use which
 
-DICA helps when you have:
-1. **A predictor** producing vector-valued cost predictions
-2. **An LP** that uses those predictions as cost coefficients
-3. **An online setting** where you observe true costs after each decision
-4. **LP sparsity** — many variables at their lower bounds (common in resource allocation)
+Both methods apply to any online predict-then-optimize setup: a **predictor** emitting
+vector-valued cost predictions, an **LP** using them as cost coefficients, and an **online**
+setting where true costs are revealed after each decision. They are domain-agnostic — healthcare
+staffing, energy dispatch, routing, portfolio/logistics.
 
-DICA is domain-agnostic: it works for healthcare staffing, energy allocation, portfolio optimization, logistics — any LP with cost uncertainty.
-
-## Testing
-
-```bash
-pip install -e ".[dev]"
-pytest tests/ -v
-# 54 tests, ~7 seconds
-```
+- **Start with `FreeCoverageDiagnostic`.** It tells you whether conformal coverage is *free*
+  (never changes your decision), *critical*, or *costly* on your problem — a pre-deployment check.
+- **If the verdict is `costly`, reach for `DICA`.** It reduces the Price of Coverage, and helps
+  most when the LP solution is **sparse** (many variables at their lower bounds, common in
+  resource allocation), where uniform conformal radii waste budget on inactive dimensions.
 
 ## Coming Soon
 
