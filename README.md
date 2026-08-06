@@ -333,4 +333,4 @@ The `FreeCoverageDiagnostic` method (COPA 2026, PMLR 329):
 
 ## License
 
-MIT License. Free for academic and commercial use with attribution; see [LICENSE](LICENSE) for the full text. Copyright © 2026 Chandra Sekhar Dronavajjala.
+MIT License. Free for academic and commercial use with attribution; see [LICENSE](LICENSE) for the full text.
