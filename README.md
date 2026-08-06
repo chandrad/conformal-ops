@@ -322,7 +322,7 @@ The `FreeCoverageDiagnostic` method (COPA 2026, PMLR 329):
 ```bibtex
 @inproceedings{dronavajjala2026free,
   title={When Is Conformal Coverage Free? Switching Thresholds for Predict-then-Optimize},
-  author={Dronavajjala, Chandra Sekhar and Kuppa, Shiva},
+  author={Dronavajjala, Chandra Sekhar},
   booktitle={Proceedings of Machine Learning Research},
   volume={329},
   year={2026},
